@@ -1,6 +1,6 @@
 import { inngest } from '../client';
 import { orderChannel, adminChannel } from '../channels';
-import { appendOrder } from '@/lib/sheets';
+import { recordFulfillment, reserveInventory } from '@/lib/demo-store';
 import { getStripe } from '@/lib/stripe';
 
 type LineItem = {
@@ -46,6 +46,12 @@ export const fulfillOrder = inngest.createFunction(
       lineItems: LineItem[];
       amountTotal: number;
       currency: string;
+      stripeSessionId?: string;
+      demo?: {
+        sessionId?: string;
+        scenario?: string;
+      };
+      metadata?: Record<string, string>;
     };
 
     const {
@@ -93,91 +99,125 @@ export const fulfillOrder = inngest.createFunction(
     };
 
     await emit('capture-payment', 'running');
-    const payment = await step.run('capture-payment', async () => {
-      if (!stripePaymentIntentId) {
-        return { status: 'mocked', amount: amountTotal, currency };
-      }
-      const pi = await getStripe().paymentIntents.retrieve(stripePaymentIntentId);
-      if (pi.status !== 'succeeded') {
-        throw new Error(`PaymentIntent ${pi.id} not succeeded: ${pi.status}`);
-      }
-      return {
-        paymentIntentId: pi.id,
-        status: pi.status,
-        amount: pi.amount,
-        currency: pi.currency,
-      };
-    });
+    let payment: {
+      paymentIntentId?: string;
+      status: string;
+      amount: number;
+      currency: string;
+    };
+    try {
+      payment = await step.run('capture-payment', async () => {
+        if (!stripePaymentIntentId) {
+          return { status: 'mocked', amount: amountTotal, currency };
+        }
+        const pi = await getStripe().paymentIntents.retrieve(stripePaymentIntentId);
+        if (pi.status !== 'succeeded') {
+          throw new Error(`PaymentIntent ${pi.id} not succeeded: ${pi.status}`);
+        }
+        return {
+          paymentIntentId: pi.id,
+          status: pi.status,
+          amount: pi.amount,
+          currency: pi.currency,
+        };
+      });
+    } catch (err) {
+      await emit('capture-payment', 'failed', { error: errorMessage(err) });
+      throw err;
+    }
     await emit('capture-payment', 'complete', payment);
 
     await emit('reserve-inventory', 'running');
-    const inventory = await step.run('reserve-inventory', async () => {
-      const reservations = (lineItems ?? []).map((li) => ({
-        sku: li.sku ?? li.productId ?? 'unknown',
-        name: li.productName ?? li.description ?? 'unknown',
-        size: li.size ?? '',
-        color: li.color ?? '',
-        quantity: li.quantity ?? 1,
-        reservedAt: new Date().toISOString(),
-      }));
-      console.log(`[fulfill-order] reserved inventory for ${orderId}:`, reservations);
-      return { reservations, count: reservations.length };
-    });
+    let inventory: {
+      reservations: Array<{
+        sku: string;
+        name: string;
+        size: string;
+        color: string;
+        quantity: number;
+        reservedAt: string;
+      }>;
+      count: number;
+    };
+    try {
+      inventory = await step.run('reserve-inventory', async () => {
+        const { reservations } = await reserveInventory({ orderId, lineItems });
+        console.log(`[fulfill-order] reserved inventory for ${orderId}:`, reservations);
+        return { reservations, count: reservations.length };
+      });
+    } catch (err) {
+      await emit('reserve-inventory', 'failed', { error: errorMessage(err) });
+      throw err;
+    }
     await emit('reserve-inventory', 'complete', inventory);
 
     await emit('send-confirmation', 'running');
-    const confirmation = await step.run('send-confirmation', async () => {
-      const payload = {
-        to: customerEmail ?? 'unknown@example.com',
-        subject: `Your Inngest swag order ${orderId} is confirmed`,
-        body: {
-          orderId,
-          items: inventory.reservations,
-          total: amountTotal,
-          currency,
-        },
-      };
-      console.log(`[fulfill-order] mock email sent for ${orderId}:`, payload);
-      // Returned output stays PII-free — sent flag only. Encryption middleware
-      // will still encrypt this in Inngest storage, but realtime subscribers
-      // (admin/order page) can render it without leaking the email.
-      return { sentAt: new Date().toISOString(), sent: true };
-    });
+    let confirmation: { sentAt: string; sent: boolean };
+    try {
+      confirmation = await step.run('send-confirmation', async () => {
+        const payload = {
+          to: customerEmail ?? 'unknown@example.com',
+          subject: `Your Inngest swag order ${orderId} is confirmed`,
+          body: {
+            orderId,
+            items: inventory.reservations,
+            total: amountTotal,
+            currency,
+          },
+        };
+        console.log(`[fulfill-order] mock email sent for ${orderId}:`, payload);
+        // Returned output stays PII-free — sent flag only. Encryption middleware
+        // will still encrypt this in Inngest storage, but realtime subscribers
+        // (admin/order page) can render it without leaking the email.
+        return { sentAt: new Date().toISOString(), sent: true };
+      });
+    } catch (err) {
+      await emit('send-confirmation', 'failed', { error: errorMessage(err) });
+      throw err;
+    }
     await emit('send-confirmation', 'complete', confirmation);
 
-    await emit('record-to-sheet', 'running');
-    const recorded = await step.run('record-to-sheet', async () => {
-      const itemsLabel = inventory.reservations
-        .map((r) => {
-          const variant = [r.size, r.color].filter(Boolean).join('/');
-          const variantTag = variant ? ` (${variant})` : '';
-          const qtyTag = r.quantity > 1 ? ` × ${r.quantity}` : '';
-          return `${r.name}${variantTag}${qtyTag}`;
-        })
-        .join(', ');
+    await emit('record-fulfillment', 'running');
+    let recorded: { recordedAt: string; demoSessionId: string; scenario: string };
+    try {
+      recorded = await step.run('record-fulfillment', async () => {
+        const itemsLabel = inventory.reservations
+          .map((r) => {
+            const variant = [r.size, r.color].filter(Boolean).join('/');
+            const variantTag = variant ? ` (${variant})` : '';
+            const qtyTag = r.quantity > 1 ? ` × ${r.quantity}` : '';
+            return `${r.name}${variantTag}${qtyTag}`;
+          })
+          .join(', ');
 
-      await appendOrder({
-        orderId,
-        createdAt: new Date().toISOString(),
-        email: customerEmail ?? '',
-        name: customerName ?? '',
-        items: itemsLabel,
-        totalCents: amountTotal,
-        currency: (currency ?? 'usd').toUpperCase(),
-        shipAddress: [shipping?.line1, shipping?.line2].filter(Boolean).join(', '),
-        shipCity: shipping?.city ?? '',
-        shipState: shipping?.state ?? '',
-        shipZip: shipping?.postalCode ?? '',
-        shipCountry: shipping?.country ?? '',
-        phone: customerPhone ?? '',
-        status: 'ready_to_ship',
-        tracking: '',
-        notes: '',
+        return recordFulfillment({
+          row: {
+            orderId,
+            createdAt: new Date().toISOString(),
+            email: customerEmail ?? '',
+            name: customerName ?? '',
+            items: itemsLabel,
+            totalCents: amountTotal,
+            currency: (currency ?? 'usd').toUpperCase(),
+            shipAddress: [shipping?.line1, shipping?.line2].filter(Boolean).join(', '),
+            shipCity: shipping?.city ?? '',
+            shipState: shipping?.state ?? '',
+            shipZip: shipping?.postalCode ?? '',
+            shipCountry: shipping?.country ?? '',
+            phone: customerPhone ?? '',
+            status: 'ready_to_ship',
+            tracking: '',
+            notes: '',
+          },
+          lineItems,
+          stripeSessionId: data.stripeSessionId,
+        });
       });
-
-      return { recordedAt: new Date().toISOString() };
-    });
-    await emit('record-to-sheet', 'complete', recorded);
+    } catch (err) {
+      await emit('record-fulfillment', 'failed', { error: errorMessage(err) });
+      throw err;
+    }
+    await emit('record-fulfillment', 'complete', recorded);
 
     return {
       orderId,
@@ -189,3 +229,7 @@ export const fulfillOrder = inngest.createFunction(
     };
   }
 );
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

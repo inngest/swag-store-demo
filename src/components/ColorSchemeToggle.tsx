@@ -149,19 +149,22 @@ function applyScheme(scheme: Scheme) {
   });
 }
 
+function initialSchemeId(): string {
+  if (typeof window === 'undefined') return 'matcha';
+  return localStorage.getItem(STORAGE_KEY) ?? 'matcha';
+}
+
 export function ColorSchemeToggle() {
   const [open, setOpen] = React.useState(false);
-  const [active, setActive] = React.useState('matcha');
+  const [active, setActive] = React.useState(initialSchemeId);
 
   React.useEffect(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEY) : null;
     const scheme =
-      SCHEMES.find((s) => s.id === saved) ??
+      SCHEMES.find((s) => s.id === active) ??
       SCHEMES.find((s) => s.id === 'matcha') ??
       SCHEMES[0];
-    setActive(scheme.id);
     applyScheme(scheme);
-  }, []);
+  }, [active]);
 
   const handleSelect = (scheme: Scheme) => {
     applyScheme(scheme);

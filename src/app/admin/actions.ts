@@ -3,7 +3,7 @@
 import { getSubscriptionToken } from 'inngest/realtime';
 import { inngest } from '@/inngest/client';
 import { adminChannel } from '@/inngest/channels';
-import { fetchPublicOrders } from '@/lib/sheets';
+import { fetchPublicOrders } from '@/lib/demo-store';
 
 export async function fetchAdminSubscriptionToken() {
   const token = await getSubscriptionToken(inngest, {

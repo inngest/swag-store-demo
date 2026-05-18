@@ -5,7 +5,7 @@ import type Stripe from 'stripe';
 import { getSubscriptionToken } from 'inngest/realtime';
 import { inngest } from '@/inngest/client';
 import { orderChannel } from '@/inngest/channels';
-import { fetchOrder } from '@/lib/sheets';
+import { fetchOrder } from '@/lib/demo-store';
 import { getStripe } from '@/lib/stripe';
 
 export async function fetchOrderSubscriptionToken(orderId: string) {

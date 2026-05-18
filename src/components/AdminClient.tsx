@@ -40,7 +40,9 @@ function foldMessage(prev: Map<string, Order>, msg: OrderMessage): Map<string, O
         .join(', ')
     : existing?.items ?? '';
 
-  const isTerminal = msg.step === 'record-to-sheet' && msg.status === 'complete';
+  const isTerminal =
+    (msg.step === 'record-to-sheet' || msg.step === 'record-fulfillment') &&
+    msg.status === 'complete';
 
   next.set(msg.orderId, {
     id: msg.orderId,

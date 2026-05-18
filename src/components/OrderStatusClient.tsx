@@ -15,6 +15,7 @@
 //   4. Source view — fulfill-order.ts with active step highlighted in citrus
 
 import * as React from 'react';
+import Link from 'next/link';
 import { subscribe } from 'inngest/realtime';
 import { StepDot } from './atoms/WorkflowTracker';
 import {
@@ -262,7 +263,7 @@ export function OrderStatusClient({
       {/* ─── Header ─── */}
       <div style={{ background: 'var(--nebula)', color: 'var(--paper)', borderBottom: '1px solid var(--ink)' }}>
         <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid rgba(245, 240, 232, 0.1)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(245, 240, 232, 0.6)' }}>
-          <a href="/">← STORE</a>
+          <Link href="/">← STORE</Link>
           <span>06 / ORDER STATUS · {orderId}</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
             <span className="live-dot" />

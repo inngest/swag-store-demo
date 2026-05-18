@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
 import { inngest } from '@/inngest/client';
+import { getDemoState, isDemoStoreEnabled } from '@/lib/demo-store';
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest) {
 
     const shipping = session.collected_information?.shipping_details ?? null;
     const customerName = session.customer_details?.name ?? shipping?.name ?? null;
+    const demo = isDemoStoreEnabled()
+      ? await getDemoState().catch((err) => {
+          console.error('[stripe-webhook] demo state unavailable:', err);
+          return undefined;
+        })
+      : undefined;
 
     await inngest.send({
       id: `order-placed-${session.id}`,
@@ -66,6 +73,7 @@ export async function POST(req: NextRequest) {
         },
         amountTotal: session.amount_total,
         currency: session.currency,
+        demo,
         lineItems: lineItems.data.map((li) => {
           const product =
             typeof li.price?.product === 'object' && li.price?.product

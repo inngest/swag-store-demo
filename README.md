@@ -36,7 +36,7 @@ Realtime publishes:
   - admin           -> presenter/admin live tracker
 ```
 
-The current code still contains the original Google Sheets-backed fulfillment path. The demo migration should replace that with Railway Postgres as the demo system of record.
+The demo data layer now uses Railway/Postgres when `DATABASE_URL` is present. The original Google Sheets path remains as a local compatibility fallback until the demo deployment is fully cut over.
 
 ## Demo Backend Direction
 
@@ -108,12 +108,10 @@ Visit:
 
 ## Migration Plan
 
-1. Add a Railway/Postgres schema for products, variants, inventory, orders, order items, demo scenarios, and demo system state.
-2. Introduce repository/adapter functions for inventory and fulfillment.
-3. Move reads and writes from Google Sheets to Postgres behind those adapters.
-4. Add `POST /api/demo/reset`.
-5. Add a protected presenter console for happy path, flaky, and broken scenarios.
-6. Add dashboard deep links or searchable identifiers for each order/run.
+1. Add dashboard deep links or searchable identifiers for each order/run.
+2. Add a mock purchase route for one-click presenter orders.
+3. Replace the temporary secret field with production auth for `/demo`.
+4. Add supplier-backed fulfillment adapter once the real swag store integration is chosen.
 
 ## Current Project Layout
 
@@ -125,7 +123,11 @@ Visit:
 | `src/inngest/client.ts` | Inngest client + encryption middleware |
 | `src/inngest/channels.ts` | Realtime channels (`order:{id}`, `admin`) |
 | `src/inngest/functions/fulfill-order.ts` | Durable fulfillment workflow |
-| `src/lib/sheets.ts` | Legacy Google Sheets fulfillment store, pending replacement |
+| `src/lib/demo-store.ts` | Railway/Postgres demo store, reset logic, scenario failures |
+| `src/lib/sheets.ts` | Legacy Google Sheets fallback |
+| `src/app/api/demo/reset/route.ts` | Resets demo orders, inventory, and scenario state |
+| `src/app/api/demo/scenario/route.ts` | Reads or changes the active demo scenario |
+| `src/app/demo/page.tsx` | Presenter demo console |
 | `src/lib/catalog.ts` | Static product catalog |
 | `src/components/OrderStatusClient.tsx` | Customer-facing order page |
 | `src/components/AdminClient.tsx` | Public live order tracker |

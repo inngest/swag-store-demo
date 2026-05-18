@@ -39,7 +39,7 @@ function Hero() {
           <div className="mono" style={{ fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 22 }}>
             01 / SWAG · APR 2026 · BUILT DURABLY
           </div>
-          <h1 className="display" style={{ fontSize: 'clamp(64px, 11vw, 168px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.03em', textTransform: 'uppercase', margin: 0, textWrap: 'balance' as any }}>
+          <h1 className="display" style={{ fontSize: 'clamp(64px, 11vw, 168px)', lineHeight: 0.86, fontWeight: 400, letterSpacing: '-0.03em', textTransform: 'uppercase', margin: 0 }}>
             Wear<br />the<br />workflow.
           </h1>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32, marginTop: 32, maxWidth: 720 }}>

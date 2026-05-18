@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useCart } from '@/lib/cart-context';
 import { PRODUCTS, formatPrice } from '@/lib/catalog';
@@ -57,7 +58,7 @@ export function CheckoutClient() {
     return (
       <div style={{ padding: '80px 32px', textAlign: 'center' }}>
         <h1 className="display" style={{ fontSize: 56, fontWeight: 400, textTransform: 'uppercase' }}>Empty cart.</h1>
-        <a href="/" className="btn btn-primary square" style={{ marginTop: 24, display: 'inline-block' }}>BACK TO CATALOG</a>
+        <Link href="/" className="btn btn-primary square" style={{ marginTop: 24, display: 'inline-block' }}>BACK TO CATALOG</Link>
       </div>
     );
   }
@@ -65,7 +66,7 @@ export function CheckoutClient() {
   return (
     <div>
       <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', padding: '16px 32px', borderBottom: '1px solid var(--rule-soft)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
-        <a href="/">← BACK</a>
+        <Link href="/">← BACK</Link>
         <span>05 / CHECKOUT</span>
       </div>
 
