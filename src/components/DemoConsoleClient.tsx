@@ -20,6 +20,11 @@ type DemoState = {
   error?: string;
 };
 
+type Notice = {
+  kind: 'info' | 'error' | 'success';
+  message: string;
+};
+
 const SCENARIOS: Array<{
   id: DemoScenario;
   label: string;
@@ -81,16 +86,27 @@ const RUNS_URL = 'https://app.inngest.com/env/production/runs';
 
 export function DemoConsoleClient() {
   const [state, setState] = React.useState<DemoState>({});
+  const [selectedScenario, setSelectedScenario] = React.useState<DemoScenario>('happy-path');
   const [secret, setSecret] = React.useState('');
   const [seedOrders, setSeedOrders] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
-  const activeScenario = SCENARIOS.find((scenario) => scenario.id === state.scenario) ?? SCENARIOS[0];
+  const [notice, setNotice] = React.useState<Notice | null>(null);
+  const activeScenario = SCENARIOS.find((scenario) => scenario.id === selectedScenario) ?? SCENARIOS[0];
+  const liveScenario = SCENARIOS.find((scenario) => scenario.id === state.scenario);
+  const isPreviewing = Boolean(state.scenario && selectedScenario !== state.scenario);
 
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       const next = await requestDemo('/api/demo/scenario');
-      if (!cancelled) setState(next);
+      if (cancelled) return;
+      if (next.scenario) {
+        setSelectedScenario(next.scenario);
+        setNotice(null);
+      } else if (next.error) {
+        setNotice({ kind: 'error', message: next.error });
+      }
+      setState(next);
     })();
     return () => {
       cancelled = true;
@@ -98,24 +114,70 @@ export function DemoConsoleClient() {
   }, []);
 
   async function setScenario(scenario: DemoScenario) {
+    setSelectedScenario(scenario);
+    const label = SCENARIOS.find((item) => item.id === scenario)?.label ?? 'scenario';
+    if (!secret.trim()) {
+      setNotice({
+        kind: 'info',
+        message: `Previewing ${label}. Enter the reset secret and click Apply selected scenario before placing an order.`,
+      });
+      return;
+    }
+
+    await applyScenario(scenario);
+  }
+
+  async function applyScenario(scenario: DemoScenario = selectedScenario) {
+    if (!secret.trim()) {
+      setNotice({
+        kind: 'info',
+        message: 'Enter the reset secret to apply this scenario to the live demo.',
+      });
+      return;
+    }
+
     setBusy(`scenario:${scenario}`);
     const next = await requestDemo('/api/demo/scenario', {
       method: 'POST',
       secret,
       body: { scenario },
     });
-    setState(next);
+    if (next.error) {
+      setNotice({ kind: 'error', message: next.error });
+    } else {
+      setState(next);
+      if (next.scenario) setSelectedScenario(next.scenario);
+      const label = SCENARIOS.find((item) => item.id === next.scenario)?.label ?? 'scenario';
+      setNotice({ kind: 'success', message: `${label} is now live for new purchases.` });
+    }
     setBusy(null);
   }
 
-  async function reset(scenario: DemoScenario = state.scenario ?? 'happy-path') {
+  async function reset(scenario: DemoScenario = selectedScenario) {
+    if (!secret.trim()) {
+      setNotice({
+        kind: 'info',
+        message: 'Enter the reset secret to reset inventory, seeded data, and the live scenario.',
+      });
+      return;
+    }
+
     setBusy('reset');
     const next = await requestDemo('/api/demo/reset', {
       method: 'POST',
       secret,
       body: { scenario, seedOrders },
     });
-    setState(next);
+    if (next.error) {
+      setNotice({ kind: 'error', message: next.error });
+    } else {
+      setState(next);
+      if (next.scenario) setSelectedScenario(next.scenario);
+      setNotice({
+        kind: 'success',
+        message: `Reset complete. ${seedOrders ? 'Six months of trend data was seeded.' : 'Trend seed data was skipped.'}`,
+      });
+    }
     setBusy(null);
   }
 
@@ -155,7 +217,12 @@ export function DemoConsoleClient() {
                   {activeScenario.label}
                 </h2>
               </div>
-              <StatusPill scenario={activeScenario.id} />
+              <div style={{ display: 'grid', justifyItems: 'end', gap: 8 }}>
+                <StatusPill label={isPreviewing ? 'Preview' : 'Selected'} />
+                <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+                  Live: {liveScenario?.label ?? 'loading'}
+                </div>
+              </div>
             </div>
             <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: 'var(--muted)', maxWidth: 620 }}>
               {activeScenario.summary}
@@ -197,10 +264,8 @@ export function DemoConsoleClient() {
             </div>
           </div>
 
-          {state.error && (
-            <div className="mono" style={{ borderTop: '1px solid var(--ink)', padding: 18, color: 'var(--danger, #ad2f2f)', fontSize: 12, lineHeight: 1.5 }}>
-              {state.error}
-            </div>
+          {notice && (
+            <NoticePanel notice={notice} />
           )}
         </div>
 
@@ -227,7 +292,8 @@ export function DemoConsoleClient() {
               {SCENARIOS.map((scenario) => (
                 <ScenarioButton
                   key={scenario.id}
-                  active={state.scenario === scenario.id}
+                  active={selectedScenario === scenario.id}
+                  applied={state.scenario === scenario.id}
                   busy={busy === `scenario:${scenario.id}`}
                   icon={scenario.icon}
                   label={scenario.label}
@@ -237,6 +303,16 @@ export function DemoConsoleClient() {
                 />
               ))}
             </div>
+            <button
+              type="button"
+              onClick={() => applyScenario()}
+              disabled={busy?.startsWith('scenario:')}
+              className="btn"
+              style={{ width: '100%', justifyContent: 'center', background: 'var(--ink)', color: 'var(--paper)', borderColor: 'var(--ink)' }}
+            >
+              <Save size={16} />
+              {busy?.startsWith('scenario:') ? 'Applying' : 'Apply selected scenario'}
+            </button>
           </div>
 
           <div style={{ border: '1px solid var(--ink)', padding: 20, display: 'grid', gap: 14 }}>
@@ -267,6 +343,7 @@ export function DemoConsoleClient() {
 
 function ScenarioButton({
   active,
+  applied,
   busy,
   eyebrow,
   icon: Icon,
@@ -275,6 +352,7 @@ function ScenarioButton({
   onClick,
 }: {
   active: boolean;
+  applied: boolean;
   busy: boolean;
   eyebrow: string;
   icon: React.ComponentType<{ size?: number }>;
@@ -313,17 +391,36 @@ function ScenarioButton({
         <span style={{ fontSize: 12.5, lineHeight: 1.35, color: active ? 'var(--paper)' : 'var(--muted)' }}>
           {summary}
         </span>
+        {applied && (
+          <span className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: active ? 'var(--paper)' : 'var(--ink)' }}>
+            live for purchases
+          </span>
+        )}
       </span>
     </button>
   );
 }
 
-function StatusPill({ scenario }: { scenario?: DemoScenario }) {
-  const label = SCENARIOS.find((s) => s.id === scenario)?.label ?? 'Unknown';
+function StatusPill({ label }: { label: string }) {
   return (
     <span className="mono" style={{ display: 'inline-flex', border: '1px solid var(--ink)', padding: '8px 10px', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
       {label}
     </span>
+  );
+}
+
+function NoticePanel({ notice }: { notice: Notice }) {
+  const color =
+    notice.kind === 'error'
+      ? 'var(--danger, #ad2f2f)'
+      : notice.kind === 'success'
+        ? 'var(--success, #1f7a42)'
+        : 'var(--muted)';
+
+  return (
+    <div className="mono" style={{ borderTop: '1px solid var(--ink)', padding: 18, color, fontSize: 12, lineHeight: 1.5 }}>
+      {notice.message}
+    </div>
   );
 }
 
