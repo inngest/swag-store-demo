@@ -197,10 +197,10 @@ export function DemoConsoleClient() {
           </h1>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Link className="btn" href="/" style={{ background: 'transparent', color: 'var(--ink)' }}>
+          <Link className="btn" href="/" target="_blank" rel="noreferrer" style={{ background: 'transparent', color: 'var(--ink)' }}>
             Store
           </Link>
-          <Link className="btn" href="/admin" style={{ background: 'var(--ink)', color: 'var(--paper)' }}>
+          <Link className="btn" href="/admin" target="_blank" rel="noreferrer" style={{ background: 'var(--ink)', color: 'var(--paper)' }}>
             Live tracker
           </Link>
         </div>
@@ -255,13 +255,13 @@ export function DemoConsoleClient() {
               ))}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginTop: 6 }}>
-              <Link className="btn" href="/" style={{ justifyContent: 'center', background: 'transparent', color: 'var(--ink)' }}>
+              <Link className="btn" href="/" target="_blank" rel="noreferrer" style={{ justifyContent: 'center', background: 'transparent', color: 'var(--ink)' }}>
                 Store
               </Link>
-              <Link className="btn" href="/admin" style={{ justifyContent: 'center', background: 'transparent', color: 'var(--ink)' }}>
+              <Link className="btn" href="/admin" target="_blank" rel="noreferrer" style={{ justifyContent: 'center', background: 'transparent', color: 'var(--ink)' }}>
                 Tracker
               </Link>
-              <Link className="btn" href={RUNS_URL} target="_blank" style={{ justifyContent: 'center', background: 'var(--ink)', color: 'var(--paper)' }}>
+              <Link className="btn" href={RUNS_URL} target="_blank" rel="noreferrer" style={{ justifyContent: 'center', background: 'var(--ink)', color: 'var(--paper)' }}>
                 Runs
                 <ExternalLink size={14} />
               </Link>
