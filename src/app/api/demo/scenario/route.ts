@@ -4,6 +4,7 @@ import {
   getDemoState,
   setDemoScenario,
 } from '@/lib/demo-store';
+import { authorizeDemoSecret } from '@/lib/demo-auth';
 
 export async function GET() {
   try {
@@ -31,15 +32,11 @@ export async function POST(req: NextRequest) {
 }
 
 function authorizeDemoMutation(req: NextRequest): { ok: true } | { ok: false; error: string } {
-  const secret = process.env.DEMO_RESET_SECRET;
-  if (!secret) return { ok: true };
-
-  const auth = req.headers.get('authorization');
-  const header = req.headers.get('x-demo-reset-secret');
-  const bearer = auth?.startsWith('Bearer ') ? auth.slice('Bearer '.length) : null;
-
-  if (header === secret || bearer === secret) return { ok: true };
-  return { ok: false, error: 'unauthorized' };
+  return authorizeDemoSecret({
+    auth: req.headers.get('authorization'),
+    configuredSecret: process.env.DEMO_RESET_SECRET,
+    header: req.headers.get('x-demo-reset-secret'),
+  });
 }
 
 function parseScenario(value: unknown): DemoScenario {

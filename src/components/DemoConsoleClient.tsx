@@ -448,7 +448,8 @@ async function requestDemo(
   try {
     const headers = new Headers();
     if (options.body) headers.set('content-type', 'application/json');
-    if (options.secret) headers.set('x-demo-reset-secret', options.secret);
+    const secret = options.secret?.trim();
+    if (secret) headers.set('x-demo-reset-secret', secret);
 
     const res = await fetch(url, {
       method: options.method ?? 'GET',
