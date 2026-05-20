@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   CloudLightning,
   CheckCircle2,
+  ExternalLink,
   KeyRound,
   RotateCcw,
   Save,
@@ -22,19 +23,68 @@ type DemoState = {
 const SCENARIOS: Array<{
   id: DemoScenario;
   label: string;
+  eyebrow: string;
+  summary: string;
+  audience: string;
+  inngest: string;
+  recovery: string;
+  presenter: string[];
   icon: React.ComponentType<{ size?: number }>;
 }> = [
-  { id: 'happy-path', label: 'Happy path', icon: CheckCircle2 },
-  { id: 'flaky-inventory', label: 'Flaky inventory', icon: AlertTriangle },
-  { id: 'regional-outage', label: 'Regional outage', icon: CloudLightning },
-  { id: 'broken-fulfillment', label: 'Broken fulfillment', icon: Wrench },
+  {
+    id: 'happy-path',
+    label: 'Happy path',
+    eyebrow: 'Baseline order',
+    summary: 'The purchase flows through payment, inventory, email, and fulfillment without drama.',
+    audience: 'The order tracker advances step by step and ends fulfilled.',
+    inngest: 'Open the run to show each step output and the durable function timeline.',
+    recovery: 'No intervention needed. This is the normal production path.',
+    presenter: ['Reset with seeded data', 'Buy one item in the store', 'Open Live tracker', 'Open the completed Inngest run'],
+    icon: CheckCircle2,
+  },
+  {
+    id: 'flaky-inventory',
+    label: 'Flaky inventory',
+    eyebrow: 'Transient 503',
+    summary: 'Inventory reservation throws twice, then succeeds on retry.',
+    audience: 'The run pauses on reserve-inventory before it recovers.',
+    inngest: 'Filter runs by swag-store-demo and open the run to show failed attempts and retry history.',
+    recovery: 'Inngest retries the failed step; the order finishes after inventory comes back.',
+    presenter: ['Pick this scenario', 'Place a small order', 'Show the failed reserve-inventory attempts', 'Wait for the retry to complete'],
+    icon: AlertTriangle,
+  },
+  {
+    id: 'regional-outage',
+    label: 'Regional outage',
+    eyebrow: 'Recoverable outage',
+    summary: 'Fulfillment fails as if us-east-1 timed out. Flip back to Happy path to simulate failover.',
+    audience: 'Payment, inventory, and email complete; fulfillment fails and waits for retry.',
+    inngest: 'Open the failed record-fulfillment step, then show the same run succeed after failover.',
+    recovery: 'Switch scenario to Happy path. The pending retry records fulfillment successfully.',
+    presenter: ['Pick Regional outage', 'Place an order', 'Show record-fulfillment failing', 'Switch to Happy path', 'Return to the run after retry'],
+    icon: CloudLightning,
+  },
+  {
+    id: 'broken-fulfillment',
+    label: 'Broken fulfillment',
+    eyebrow: 'Hard failure',
+    summary: 'The supplier endpoint stays down so fulfillment keeps failing.',
+    audience: 'The order never reaches fulfilled until the scenario changes or the run is handled.',
+    inngest: 'Use this to walk through error details, attempts, logs, and where ops would investigate.',
+    recovery: 'Reset or change to Happy path when you are ready to leave the broken state.',
+    presenter: ['Pick Broken fulfillment', 'Place an order', 'Open the failed run', 'Explain retries, observability, and recovery options'],
+    icon: Wrench,
+  },
 ];
+
+const RUNS_URL = 'https://app.inngest.com/env/production/runs';
 
 export function DemoConsoleClient() {
   const [state, setState] = React.useState<DemoState>({});
   const [secret, setSecret] = React.useState('');
   const [seedOrders, setSeedOrders] = React.useState(true);
   const [busy, setBusy] = React.useState<string | null>(null);
+  const activeScenario = SCENARIOS.find((scenario) => scenario.id === state.scenario) ?? SCENARIOS[0];
 
   React.useEffect(() => {
     let cancelled = false;
@@ -90,27 +140,65 @@ export function DemoConsoleClient() {
         </div>
       </div>
 
-      <section style={{ padding: 32, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 24 }}>
-        <div style={{ border: '1px solid var(--ink)', padding: 20, display: 'grid', gap: 18, alignContent: 'start' }}>
-          <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
-            CURRENT SESSION
-          </div>
-          <div>
-            <div className="mono" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-              ID
+      <section style={{ padding: 32, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 24, alignItems: 'start' }}>
+        <div style={{ border: '1px solid var(--ink)', display: 'grid', alignContent: 'start' }}>
+          <div style={{ padding: 24, borderBottom: '1px solid var(--ink)', display: 'grid', gap: 14 }}>
+            <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+              ACTIVE DEMO STORY
             </div>
-            <div className="mono" style={{ fontSize: 15, overflowWrap: 'anywhere' }}>
-              {state.demoSessionId ?? 'not initialized'}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'start' }}>
+              <div>
+                <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 8 }}>
+                  {activeScenario.eyebrow}
+                </div>
+                <h2 className="display" style={{ fontSize: 42, lineHeight: 0.95, fontWeight: 400, textTransform: 'uppercase', margin: 0 }}>
+                  {activeScenario.label}
+                </h2>
+              </div>
+              <StatusPill scenario={activeScenario.id} />
+            </div>
+            <p style={{ margin: 0, fontSize: 15, lineHeight: 1.55, color: 'var(--muted)', maxWidth: 620 }}>
+              {activeScenario.summary}
+            </p>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))', borderBottom: '1px solid var(--ink)' }}>
+            <StoryBlock label="Buyer sees" value={activeScenario.audience} />
+            <StoryBlock label="Inngest moment" value={activeScenario.inngest} />
+            <StoryBlock label="Recovery beat" value={activeScenario.recovery} />
+            <StoryBlock label="Session" value={state.demoSessionId ?? 'not initialized'} mono />
+          </div>
+
+          <div style={{ padding: 24, display: 'grid', gap: 14 }}>
+            <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
+              PRESENTER BEATS
+            </div>
+            <div style={{ display: 'grid', gap: 10 }}>
+              {activeScenario.presenter.map((beat, index) => (
+                <div key={beat} style={{ display: 'grid', gridTemplateColumns: '28px 1fr', gap: 12, alignItems: 'center' }}>
+                  <span className="mono tabnum" style={{ width: 28, height: 28, border: '1px solid var(--ink)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>
+                    {index + 1}
+                  </span>
+                  <span style={{ fontSize: 13.5, lineHeight: 1.45 }}>{beat}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8, marginTop: 6 }}>
+              <Link className="btn" href="/" style={{ justifyContent: 'center', background: 'transparent', color: 'var(--ink)' }}>
+                Store
+              </Link>
+              <Link className="btn" href="/admin" style={{ justifyContent: 'center', background: 'transparent', color: 'var(--ink)' }}>
+                Tracker
+              </Link>
+              <Link className="btn" href={RUNS_URL} target="_blank" style={{ justifyContent: 'center', background: 'var(--ink)', color: 'var(--paper)' }}>
+                Runs
+                <ExternalLink size={14} />
+              </Link>
             </div>
           </div>
-          <div>
-            <div className="mono" style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>
-              SCENARIO
-            </div>
-            <StatusPill scenario={state.scenario} />
-          </div>
+
           {state.error && (
-            <div className="mono" style={{ borderTop: '1px solid var(--rule-soft)', paddingTop: 14, color: 'var(--danger, #ad2f2f)', fontSize: 12, lineHeight: 1.5 }}>
+            <div className="mono" style={{ borderTop: '1px solid var(--ink)', padding: 18, color: 'var(--danger, #ad2f2f)', fontSize: 12, lineHeight: 1.5 }}>
               {state.error}
             </div>
           )}
@@ -135,7 +223,7 @@ export function DemoConsoleClient() {
             <div className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
               SCENARIOS
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
+            <div style={{ display: 'grid', gap: 8 }}>
               {SCENARIOS.map((scenario) => (
                 <ScenarioButton
                   key={scenario.id}
@@ -143,6 +231,8 @@ export function DemoConsoleClient() {
                   busy={busy === `scenario:${scenario.id}`}
                   icon={scenario.icon}
                   label={scenario.label}
+                  eyebrow={scenario.eyebrow}
+                  summary={scenario.summary}
                   onClick={() => setScenario(scenario.id)}
                 />
               ))}
@@ -178,14 +268,18 @@ export function DemoConsoleClient() {
 function ScenarioButton({
   active,
   busy,
+  eyebrow,
   icon: Icon,
   label,
+  summary,
   onClick,
 }: {
   active: boolean;
   busy: boolean;
+  eyebrow: string;
   icon: React.ComponentType<{ size?: number }>;
   label: string;
+  summary: string;
   onClick: () => void;
 }) {
   return (
@@ -194,20 +288,31 @@ function ScenarioButton({
       onClick={onClick}
       disabled={busy}
       style={{
-        minHeight: 92,
+        minHeight: 108,
         border: '1px solid var(--ink)',
         background: active ? 'var(--ink)' : 'transparent',
         color: active ? 'var(--paper)' : 'var(--ink)',
         display: 'grid',
-        placeItems: 'center',
-        gap: 8,
-        padding: 12,
+        gridTemplateColumns: '32px 1fr',
+        gap: 12,
+        padding: 14,
         cursor: busy ? 'wait' : 'pointer',
+        textAlign: 'left',
       }}
     >
-      {busy ? <Save size={18} /> : <Icon size={18} />}
-      <span className="mono" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em', textAlign: 'center' }}>
-        {label}
+      <span style={{ width: 32, height: 32, border: active ? '1px solid var(--paper)' : '1px solid var(--ink)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        {busy ? <Save size={17} /> : <Icon size={17} />}
+      </span>
+      <span style={{ display: 'grid', gap: 5 }}>
+        <span className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.72 }}>
+          {eyebrow}
+        </span>
+        <span className="mono" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+          {label}
+        </span>
+        <span style={{ fontSize: 12.5, lineHeight: 1.35, color: active ? 'var(--paper)' : 'var(--muted)' }}>
+          {summary}
+        </span>
       </span>
     </button>
   );
@@ -219,6 +324,19 @@ function StatusPill({ scenario }: { scenario?: DemoScenario }) {
     <span className="mono" style={{ display: 'inline-flex', border: '1px solid var(--ink)', padding: '8px 10px', fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
       {label}
     </span>
+  );
+}
+
+function StoryBlock({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ padding: 20, borderRight: '1px solid var(--ink)', borderBottom: '1px solid var(--ink)', minHeight: 128 }}>
+      <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 10 }}>
+        {label}
+      </div>
+      <div className={mono ? 'mono' : undefined} style={{ fontSize: mono ? 12 : 13.5, lineHeight: 1.5, overflowWrap: 'anywhere' }}>
+        {value}
+      </div>
+    </div>
   );
 }
 
