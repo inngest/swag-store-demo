@@ -50,15 +50,22 @@ export async function POST(req: NextRequest) {
 
     const session = await getStripe().checkout.sessions.create({
       mode: 'payment',
+      payment_method_types: ['card'],
       line_items: lineItems,
+      customer_email: 'demo-buyer@inngest.com',
       success_url: `${origin}/orders/confirmation?ord=${orderId}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/checkout`,
-      metadata: { orderId },
-      shipping_address_collection: {
-        allowed_countries: ['US', 'CA'],
+      metadata: {
+        orderId,
+        demoCustomerEmail: 'demo-buyer@inngest.com',
+        demoCustomerName: 'Demo Buyer',
+        demoShipLine1: '123 Workflow Way',
+        demoShipCity: 'San Francisco',
+        demoShipState: 'CA',
+        demoShipPostalCode: '94107',
+        demoShipCountry: 'US',
       },
       billing_address_collection: 'auto',
-      phone_number_collection: { enabled: true },
     });
 
     if (!session.url) {

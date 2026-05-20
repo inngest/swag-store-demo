@@ -14,7 +14,8 @@ export async function sendOrderPlacedEventFromCheckoutSession(
   });
 
   const shipping = session.collected_information?.shipping_details ?? null;
-  const customerName = session.customer_details?.name ?? shipping?.name ?? null;
+  const metadata = session.metadata ?? {};
+  const customerName = session.customer_details?.name ?? shipping?.name ?? metadata.demoCustomerName ?? null;
   const demo = isDemoStoreEnabled()
     ? await getDemoState().catch((err) => {
         console.error(`[${source}] demo state unavailable:`, err);
@@ -36,7 +37,7 @@ export async function sendOrderPlacedEventFromCheckoutSession(
       // before it lands in Inngest's storage. Non-PII (orderId, totals,
       // line items) stays plaintext for dashboard observability.
       encrypted: {
-        customerEmail: session.customer_details?.email ?? session.customer_email,
+        customerEmail: session.customer_details?.email ?? session.customer_email ?? metadata.demoCustomerEmail,
         customerName,
         customerPhone: session.customer_details?.phone ?? null,
         shipping: shipping
@@ -49,7 +50,17 @@ export async function sendOrderPlacedEventFromCheckoutSession(
               postalCode: shipping.address?.postal_code ?? null,
               country: shipping.address?.country ?? null,
             }
-          : null,
+          : metadata.demoShipLine1
+            ? {
+                name: customerName,
+                line1: metadata.demoShipLine1,
+                line2: null,
+                city: metadata.demoShipCity ?? null,
+                state: metadata.demoShipState ?? null,
+                postalCode: metadata.demoShipPostalCode ?? null,
+                country: metadata.demoShipCountry ?? null,
+              }
+            : null,
       },
       amountTotal: session.amount_total,
       currency: session.currency,
