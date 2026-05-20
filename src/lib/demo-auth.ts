@@ -20,7 +20,9 @@ export function authorizeDemoSecret({
 function normalizeSecret(value: string | null | undefined): string | null {
   if (!value) return null;
 
-  const trimmed = value.trim();
+  const trimmed = value
+    .trim()
+    .replace(/^(?:\\[nrt])+|(?:\\[nrt])+$/g, '');
   if (!trimmed) return null;
 
   if (
