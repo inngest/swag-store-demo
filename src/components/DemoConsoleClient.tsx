@@ -113,18 +113,22 @@ export function DemoConsoleClient() {
     };
   }, []);
 
-  async function setScenario(scenario: DemoScenario) {
+  function setScenario(scenario: DemoScenario) {
     setSelectedScenario(scenario);
     const label = SCENARIOS.find((item) => item.id === scenario)?.label ?? 'scenario';
-    if (!secret.trim()) {
+
+    if (scenario === state.scenario) {
       setNotice({
         kind: 'info',
-        message: `Previewing ${label}. Enter the reset secret and click Apply selected scenario before placing an order.`,
+        message: `${label} is already live for new purchases.`,
       });
       return;
     }
 
-    await applyScenario(scenario);
+    setNotice({
+      kind: 'info',
+      message: `Previewing ${label}. Click Apply selected scenario to make it live for new purchases.`,
+    });
   }
 
   async function applyScenario(scenario: DemoScenario = selectedScenario) {
