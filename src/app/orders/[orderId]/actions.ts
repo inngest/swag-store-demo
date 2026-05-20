@@ -7,6 +7,7 @@ import { inngest } from '@/inngest/client';
 import { orderChannel } from '@/inngest/channels';
 import { fetchOrder } from '@/lib/demo-store';
 import { getStripe } from '@/lib/stripe';
+import { sendOrderPlacedEventFromCheckoutSession } from '@/lib/stripe-order-event';
 
 export async function fetchOrderSubscriptionToken(orderId: string) {
   const token = await getSubscriptionToken(inngest, {
@@ -46,6 +47,15 @@ export async function unlockOrderViewing(
 
   if (session.metadata?.orderId !== orderId) {
     return { error: 'session does not match order' };
+  }
+
+  try {
+    await sendOrderPlacedEventFromCheckoutSession(session, 'confirmation-fallback');
+  } catch (err) {
+    console.error(
+      '[confirmation-fallback] failed to send store/order.placed:',
+      err instanceof Error ? err.message : err,
+    );
   }
 
   const cookieStore = await cookies();
