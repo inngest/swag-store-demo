@@ -46,7 +46,8 @@ function parseScenario(value: unknown): DemoScenario {
   if (
     value === 'happy-path' ||
     value === 'flaky-inventory' ||
-    value === 'broken-fulfillment'
+    value === 'broken-fulfillment' ||
+    value === 'regional-outage'
   ) {
     return value;
   }

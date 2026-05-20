@@ -4,6 +4,7 @@ import * as React from 'react';
 import Link from 'next/link';
 import {
   AlertTriangle,
+  CloudLightning,
   CheckCircle2,
   KeyRound,
   RotateCcw,
@@ -25,6 +26,7 @@ const SCENARIOS: Array<{
 }> = [
   { id: 'happy-path', label: 'Happy path', icon: CheckCircle2 },
   { id: 'flaky-inventory', label: 'Flaky inventory', icon: AlertTriangle },
+  { id: 'regional-outage', label: 'Regional outage', icon: CloudLightning },
   { id: 'broken-fulfillment', label: 'Broken fulfillment', icon: Wrench },
 ];
 
@@ -154,7 +156,7 @@ export function DemoConsoleClient() {
                 onChange={(e) => setSeedOrders(e.target.checked)}
                 type="checkbox"
               />
-              Seed admin tracker
+              Seed 6 months of tracker data
             </label>
             <button
               type="button"

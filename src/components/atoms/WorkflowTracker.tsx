@@ -2,7 +2,7 @@ import * as React from 'react';
 
 export type WfStep = { name: string; detail?: string; duration?: string };
 
-export function StepDot({ status }: { status: 'complete' | 'running' | 'pending' }) {
+export function StepDot({ status }: { status: 'complete' | 'running' | 'pending' | 'failed' }) {
   if (status === 'complete') {
     return (
       <div style={{ width: 14, height: 14, background: 'var(--ink)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -18,6 +18,9 @@ export function StepDot({ status }: { status: 'complete' | 'running' | 'pending'
         <div className="pulse" style={{ position: 'absolute', inset: 0, background: 'var(--citrus)' }} />
       </div>
     );
+  }
+  if (status === 'failed') {
+    return <div style={{ width: 14, height: 14, background: 'var(--danger, #ad2f2f)', border: '1px solid var(--ink)' }} />;
   }
   return <div style={{ width: 14, height: 14, border: '1px solid var(--ink)', opacity: 0.35 }} />;
 }

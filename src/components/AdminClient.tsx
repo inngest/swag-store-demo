@@ -4,9 +4,11 @@ import * as React from 'react';
 import Link from 'next/link';
 import { subscribe } from 'inngest/realtime';
 import {
+  fetchDemoAnalyticsAction,
   fetchAdminSubscriptionToken,
   fetchPublicOrdersAction,
 } from '@/app/admin/actions';
+import type { DemoAnalytics } from '@/lib/demo-store';
 import { StepDot } from './atoms/WorkflowTracker';
 
 type OrderMessage = {
@@ -91,6 +93,7 @@ function formatRelative(ts: number, now: number): string {
 
 export function AdminClient() {
   const [orders, setOrders] = React.useState<Map<string, Order>>(new Map());
+  const [analytics, setAnalytics] = React.useState<DemoAnalytics | null>(null);
   const [pulse, setPulse] = React.useState<string | null>(null);
   const [now, setNow] = React.useState<number>(() => Date.now());
   const [subStatus, setSubStatus] = React.useState<string>('connecting');
@@ -106,8 +109,12 @@ export function AdminClient() {
     let cancelled = false;
     (async () => {
       try {
-        const rows = await fetchPublicOrdersAction();
+        const [rows, nextAnalytics] = await Promise.all([
+          fetchPublicOrdersAction(),
+          fetchDemoAnalyticsAction(),
+        ]);
         if (cancelled) return;
+        setAnalytics(nextAnalytics);
         setOrders((prev) => {
           let next = prev;
           for (const row of rows) next = foldHydratedRow(next, row);
@@ -169,7 +176,9 @@ export function AdminClient() {
   );
 
   const liveCount = orderList.filter((o) => o.status === 'running').length;
-  const fulfilledCount = orderList.filter((o) => o.status === 'complete').length;
+  const totalOrders = analytics?.totalOrders ?? orderList.filter((o) => o.status === 'complete').length;
+  const totalRevenue = analytics?.totalRevenueCents ?? 0;
+  const last30DaysOrders = analytics?.last30DaysOrders ?? 0;
 
   return (
     <div>
@@ -188,11 +197,15 @@ export function AdminClient() {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 1, background: 'var(--ink)', border: '1px solid var(--ink)' }}>
           <Stat label="IN FLIGHT" value={liveCount} accent />
-          <Stat label="FULFILLED" value={fulfilledCount} />
+          <Stat label="6MO ORDERS" value={totalOrders} />
+          <Stat label="30D ORDERS" value={last30DaysOrders} />
+          <Stat label="6MO REVENUE" value={formatMoney(totalRevenue)} />
         </div>
       </div>
 
       <div style={{ padding: '0 32px 32px' }}>
+        <TrendPanel analytics={analytics} />
+
         <div className="mono" style={{ display: 'grid', gridTemplateColumns: '0.8fr 2fr 1.4fr 0.7fr 0.5fr', padding: '16px 0', borderBottom: '1px solid var(--ink)', fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)' }}>
           <span>ORDER</span>
           <span>ITEMS</span>
@@ -224,7 +237,7 @@ export function AdminClient() {
             <span className="mono tabnum" style={{ fontSize: 12 }}>{o.id}</span>
             <span style={{ fontSize: 12.5, color: 'var(--ink)' }}>{o.items || '—'}</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              <StepDot status={o.status === 'complete' ? 'complete' : 'running'} />
+              <StepDot status={o.status} />
               <span className="mono" style={{ fontSize: 11.5 }}>{o.step}</span>
             </span>
             <span className="mono" style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{formatRelative(o.lastUpdated, now)}</span>
@@ -244,6 +257,85 @@ export function AdminClient() {
   );
 }
 
+function TrendPanel({ analytics }: { analytics: DemoAnalytics | null }) {
+  const months = analytics?.months ?? [];
+  const topProducts = analytics?.topProducts ?? [];
+  const maxRevenue = Math.max(1, ...months.map((month) => month.revenueCents));
+  const maxQuantity = Math.max(1, ...topProducts.map((product) => product.quantity));
+
+  return (
+    <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(280px, 0.8fr)', gap: 24, padding: '28px 0', borderBottom: '1px solid var(--ink)' }}>
+      <div>
+        <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 18 }}>
+          Six-month trend
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.max(months.length, 1)}, minmax(42px, 1fr))`, gap: 10, minHeight: 210, alignItems: 'end' }}>
+          {months.length === 0 && (
+            <div className="mono" style={{ color: 'var(--muted)', fontSize: 12 }}>
+              Reset with seeded data to load trend history.
+            </div>
+          )}
+          {months.map((month) => {
+            const height = Math.max(18, Math.round((month.revenueCents / maxRevenue) * 160));
+            return (
+              <div key={month.startDate} style={{ display: 'grid', gap: 8, alignItems: 'end' }}>
+                <div style={{ display: 'grid', alignItems: 'end', minHeight: 168 }}>
+                  <div
+                    title={`${month.orders} orders · ${formatMoney(month.revenueCents)}`}
+                    style={{
+                      height,
+                      border: '1px solid var(--ink)',
+                      background: month.revenueCents === maxRevenue ? 'var(--citrus)' : 'var(--paper)',
+                    }}
+                  />
+                </div>
+                <div className="mono" style={{ fontSize: 10.5, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  {month.label}
+                </div>
+                <div className="mono tabnum" style={{ fontSize: 11 }}>
+                  {month.orders}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div>
+        <div className="mono" style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 18 }}>
+          Top products
+        </div>
+        <div style={{ display: 'grid', gap: 12 }}>
+          {topProducts.length === 0 && (
+            <div className="mono" style={{ color: 'var(--muted)', fontSize: 12 }}>
+              No product trend data yet.
+            </div>
+          )}
+          {topProducts.map((product) => (
+            <div key={product.name} style={{ display: 'grid', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
+                <span style={{ fontSize: 12.5 }}>{product.name}</span>
+                <span className="mono tabnum" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                  {product.quantity} sold
+                </span>
+              </div>
+              <div style={{ height: 12, border: '1px solid var(--ink)', background: 'var(--paper)' }}>
+                <div
+                  style={{
+                    width: `${Math.max(6, Math.round((product.quantity / maxQuantity) * 100))}%`,
+                    height: '100%',
+                    background: 'var(--ink)',
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function Stat({ label, value, accent }: { label: string; value: number | string; accent?: boolean }) {
   return (
     <div style={{ background: accent ? 'var(--citrus)' : 'var(--paper)', padding: '20px 24px' }}>
@@ -256,4 +348,10 @@ function Stat({ label, value, accent }: { label: string; value: number | string;
       </div>
     </div>
   );
+}
+
+function formatMoney(cents: number): string {
+  const dollars = cents / 100;
+  if (dollars >= 1000) return `$${(dollars / 1000).toFixed(1)}k`;
+  return `$${dollars.toLocaleString('en-US')}`;
 }

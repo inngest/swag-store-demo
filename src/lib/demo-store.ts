@@ -8,7 +8,34 @@ import {
   fetchPublicOrders as fetchSheetPublicOrders,
 } from './sheets';
 
-export type DemoScenario = 'happy-path' | 'flaky-inventory' | 'broken-fulfillment';
+export type DemoScenario =
+  | 'happy-path'
+  | 'flaky-inventory'
+  | 'broken-fulfillment'
+  | 'regional-outage';
+
+export type DemoTrendPoint = {
+  label: string;
+  startDate: string;
+  endDate: string;
+  orders: number;
+  revenueCents: number;
+};
+
+export type DemoProductTrend = {
+  name: string;
+  quantity: number;
+  revenueCents: number;
+};
+
+export type DemoAnalytics = {
+  totalOrders: number;
+  totalRevenueCents: number;
+  last30DaysOrders: number;
+  last30DaysRevenueCents: number;
+  months: DemoTrendPoint[];
+  topProducts: DemoProductTrend[];
+};
 
 export type DemoLineItem = {
   description: string | null;
@@ -338,6 +365,89 @@ export async function recordFulfillment({
   return { recordedAt: new Date().toISOString(), demoSessionId, scenario };
 }
 
+export async function fetchDemoAnalytics(): Promise<DemoAnalytics> {
+  if (!isDemoStoreEnabled()) return emptyAnalytics();
+
+  await ensureDemoSchema();
+  const demoSessionId = await getActiveDemoSessionId();
+  const months = getLastSixMonths();
+  const startDate = months[0]?.startDate ?? new Date().toISOString();
+  const thirtyDaysAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString();
+
+  const [ordersRes, topProductsRes] = await Promise.all([
+    getPool().query(
+      `select created_at, total_cents
+       from demo_orders
+       where demo_session_id = $1
+         and created_at >= $2
+       order by created_at asc`,
+      [demoSessionId, startDate],
+    ),
+    getPool().query(
+      `select i.name, sum(i.quantity)::int as quantity,
+              coalesce(sum(i.amount_total), 0)::int as revenue_cents
+       from demo_order_items i
+       join demo_orders o on o.order_id = i.order_id
+       where o.demo_session_id = $1
+         and o.created_at >= $2
+       group by i.name
+       order by quantity desc, revenue_cents desc
+       limit 5`,
+      [demoSessionId, startDate],
+    ),
+  ]);
+
+  const monthMap = new Map(
+    months.map((month) => [
+      month.key,
+      {
+        label: month.label,
+        startDate: month.startDate,
+        endDate: month.endDate,
+        orders: 0,
+        revenueCents: 0,
+      },
+    ]),
+  );
+
+  let totalOrders = 0;
+  let totalRevenueCents = 0;
+  let last30DaysOrders = 0;
+  let last30DaysRevenueCents = 0;
+
+  for (const row of ordersRes.rows) {
+    const createdAt = new Date(row.created_at);
+    const revenueCents = Number(row.total_cents ?? 0);
+    const key = monthKey(createdAt);
+    const bucket = monthMap.get(key);
+    if (bucket) {
+      bucket.orders += 1;
+      bucket.revenueCents += revenueCents;
+    }
+
+    totalOrders += 1;
+    totalRevenueCents += revenueCents;
+
+    if (createdAt.getTime() >= new Date(thirtyDaysAgo).getTime()) {
+      last30DaysOrders += 1;
+      last30DaysRevenueCents += revenueCents;
+    }
+  }
+
+  return {
+    totalOrders,
+    totalRevenueCents,
+    last30DaysOrders,
+    last30DaysRevenueCents,
+    months: Array.from(monthMap.values()),
+    topProducts: topProductsRes.rows.map((row) => ({
+      name: String(row.name ?? 'Unknown item'),
+      quantity: Number(row.quantity ?? 0),
+      revenueCents: Number(row.revenue_cents ?? 0),
+    })),
+  };
+}
+
 export async function fetchPublicOrders(limit = 50): Promise<
   Array<{
     orderId: string;
@@ -449,58 +559,9 @@ async function seedCatalog(): Promise<void> {
 }
 
 async function seedCompletedOrders(demoSessionId: string): Promise<void> {
-  const now = Date.now();
-  const seedRows: OrderRow[] = [
-    {
-      orderId: 'ord_demo01',
-      createdAt: new Date(now - 1000 * 60 * 12).toISOString(),
-      email: 'demo@example.com',
-      name: 'Demo Buyer',
-      items: 'Inngest Hoodie (M/citrus)',
-      totalCents: 5800,
-      currency: 'USD',
-      shipAddress: '123 Durable Way',
-      shipCity: 'San Francisco',
-      shipState: 'CA',
-      shipZip: '94107',
-      shipCountry: 'US',
-      phone: '',
-      status: 'ready_to_ship',
-      tracking: '',
-      notes: 'seeded demo order',
-    },
-  ];
-
-  for (const row of seedRows) {
-    await getPool().query(
-      `insert into demo_orders (
-        order_id, demo_session_id, created_at, customer_email, customer_name,
-        items, total_cents, currency, ship_address, ship_city, ship_state,
-        ship_zip, ship_country, status, tracking, notes, scenario
-      )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-      on conflict (order_id) do nothing`,
-      [
-        row.orderId,
-        demoSessionId,
-        row.createdAt,
-        row.email,
-        row.name,
-        row.items,
-        row.totalCents,
-        row.currency,
-        row.shipAddress,
-        row.shipCity,
-        row.shipState,
-        row.shipZip,
-        row.shipCountry,
-        row.status,
-        row.tracking,
-        row.notes,
-        'happy-path',
-      ],
-    );
-  }
+  const { rows, items } = buildSeedOrders(demoSessionId);
+  await insertSeedOrders(rows);
+  await insertSeedOrderItems(items);
 }
 
 async function findVariantForUpdate(client: PoolClient, item: DemoLineItem): Promise<{
@@ -547,6 +608,12 @@ async function maybeFailDemoStep(orderId: string, stepName: string): Promise<voi
   if (scenario === 'broken-fulfillment' && stepName === 'record-fulfillment') {
     throw new Error('DEMO_FAILURE: Supplier fulfillment endpoint is currently down');
   }
+
+  if (scenario === 'regional-outage' && stepName === 'record-fulfillment' && attempts <= 2) {
+    throw new Error(
+      'DEMO_RECOVERABLE_FAILURE: AWS us-east-1 fulfillment gateway timed out; retry after regional failover',
+    );
+  }
 }
 
 async function incrementStepAttempt(orderId: string, stepName: string): Promise<number> {
@@ -586,8 +653,330 @@ function isDemoScenario(value: unknown): value is DemoScenario {
   return (
     value === 'happy-path' ||
     value === 'flaky-inventory' ||
-    value === 'broken-fulfillment'
+    value === 'broken-fulfillment' ||
+    value === 'regional-outage'
   );
+}
+
+type SeedOrder = {
+  orderId: string;
+  demoSessionId: string;
+  createdAt: string;
+  email: string;
+  name: string;
+  phone: string;
+  items: string;
+  totalCents: number;
+  currency: string;
+  shipAddress: string;
+  shipCity: string;
+  shipState: string;
+  shipZip: string;
+  shipCountry: string;
+  status: string;
+  tracking: string;
+  notes: string;
+  scenario: DemoScenario;
+  stripeSessionId: string | null;
+};
+
+type SeedOrderItem = {
+  orderId: string;
+  productId: string;
+  variantId: string;
+  sku: string;
+  name: string;
+  size: string;
+  color: string;
+  quantity: number;
+  amountTotal: number;
+};
+
+function buildSeedOrders(demoSessionId: string): {
+  rows: SeedOrder[];
+  items: SeedOrderItem[];
+} {
+  const rows: SeedOrder[] = [];
+  const items: SeedOrderItem[] = [];
+  const rand = seededRandom(20260520);
+  const today = new Date();
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 5, 1));
+  const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const products = PRODUCTS.map((product, index) => ({
+    product,
+    weight: [34, 22, 30, 14][index] ?? 10,
+  }));
+  const buyerNames = [
+    'Ada Lovelace',
+    'Grace Hopper',
+    'Katherine Johnson',
+    'Margaret Hamilton',
+    'Barbara Liskov',
+    'Radia Perlman',
+    'Evelyn Boyd',
+    'Mary Jackson',
+  ];
+  const cities = [
+    ['San Francisco', 'CA', '94107'],
+    ['New York', 'NY', '10013'],
+    ['Austin', 'TX', '78701'],
+    ['Seattle', 'WA', '98101'],
+    ['Denver', 'CO', '80202'],
+    ['Atlanta', 'GA', '30303'],
+  ];
+
+  let orderNumber = 1;
+  for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    const dayOfWeek = cursor.getUTCDay();
+    const monthIndex =
+      (cursor.getUTCFullYear() - start.getUTCFullYear()) * 12 +
+      cursor.getUTCMonth() -
+      start.getUTCMonth();
+    const weekdayLift = dayOfWeek >= 1 && dayOfWeek <= 4 ? 1 : 0;
+    const launchLift = monthIndex === 4 && cursor.getUTCDate() >= 8 && cursor.getUTCDate() <= 18 ? 2 : 0;
+    const meetupLift = dayOfWeek === 3 && rand() > 0.45 ? 2 : 0;
+    const baseline = 1 + Math.floor(monthIndex / 2) + weekdayLift + launchLift + meetupLift;
+    const orderCount = Math.max(1, baseline + Math.floor(rand() * 3));
+
+    for (let i = 0; i < orderCount; i += 1) {
+      const createdAt = new Date(cursor);
+      createdAt.setUTCHours(14 + Math.floor(rand() * 9), Math.floor(rand() * 60), Math.floor(rand() * 60));
+
+      const orderId = `ord_seed_${String(orderNumber).padStart(4, '0')}`;
+      const name = buyerNames[Math.floor(rand() * buyerNames.length)] ?? 'Demo Buyer';
+      const [city, state, zip] = cities[Math.floor(rand() * cities.length)] ?? cities[0];
+      const lineCount = rand() > 0.72 ? 2 : 1;
+      const orderItems: SeedOrderItem[] = [];
+
+      for (let line = 0; line < lineCount; line += 1) {
+        const product = weightedPick(products, rand).product;
+        const variant = product.variants[Math.floor(rand() * product.variants.length)] ?? product.variants[0];
+        const quantity = product.category === 'accessories' && rand() > 0.62 ? 2 : 1;
+
+        orderItems.push({
+          orderId,
+          productId: product.id,
+          variantId: variant.id,
+          sku: product.sku,
+          name: product.name,
+          size: variant.size ?? '',
+          color: variant.color ?? '',
+          quantity,
+          amountTotal: product.price * quantity,
+        });
+      }
+
+      const totalCents = orderItems.reduce((sum, item) => sum + item.amountTotal, 0);
+      const itemsLabel = orderItems
+        .map((item) => {
+          const variant = [item.size, item.color].filter(Boolean).join('/');
+          const variantTag = variant ? ` (${variant})` : '';
+          const qtyTag = item.quantity > 1 ? ` x ${item.quantity}` : '';
+          return `${item.name}${variantTag}${qtyTag}`;
+        })
+        .join(', ');
+
+      rows.push({
+        orderId,
+        demoSessionId,
+        createdAt: createdAt.toISOString(),
+        email: `buyer${orderNumber}@example.com`,
+        name,
+        phone: '',
+        items: itemsLabel,
+        totalCents,
+        currency: 'USD',
+        shipAddress: `${100 + Math.floor(rand() * 899)} Durable Way`,
+        shipCity: city,
+        shipState: state,
+        shipZip: zip,
+        shipCountry: 'US',
+        status: 'ready_to_ship',
+        tracking: '',
+        notes: 'six-month seeded trend order',
+        scenario: 'happy-path',
+        stripeSessionId: null,
+      });
+      items.push(...orderItems);
+      orderNumber += 1;
+    }
+  }
+
+  return { rows, items };
+}
+
+async function insertSeedOrders(rows: SeedOrder[]): Promise<void> {
+  const columns = [
+    'order_id',
+    'demo_session_id',
+    'created_at',
+    'customer_email',
+    'customer_name',
+    'customer_phone',
+    'items',
+    'total_cents',
+    'currency',
+    'ship_address',
+    'ship_city',
+    'ship_state',
+    'ship_zip',
+    'ship_country',
+    'status',
+    'tracking',
+    'notes',
+    'scenario',
+    'stripe_session_id',
+  ];
+
+  const values = rows.map((row) => [
+    row.orderId,
+    row.demoSessionId,
+    row.createdAt,
+    row.email,
+    row.name,
+    row.phone,
+    row.items,
+    row.totalCents,
+    row.currency,
+    row.shipAddress,
+    row.shipCity,
+    row.shipState,
+    row.shipZip,
+    row.shipCountry,
+    row.status,
+    row.tracking,
+    row.notes,
+    row.scenario,
+    row.stripeSessionId,
+  ]);
+
+  await insertInChunks(
+    'demo_orders',
+    columns,
+    values,
+    'on conflict (order_id) do nothing',
+  );
+}
+
+async function insertSeedOrderItems(items: SeedOrderItem[]): Promise<void> {
+  const columns = [
+    'order_id',
+    'product_id',
+    'variant_id',
+    'sku',
+    'name',
+    'size',
+    'color',
+    'quantity',
+    'amount_total',
+  ];
+
+  const values = items.map((item) => [
+    item.orderId,
+    item.productId,
+    item.variantId,
+    item.sku,
+    item.name,
+    item.size,
+    item.color,
+    item.quantity,
+    item.amountTotal,
+  ]);
+
+  await insertInChunks('demo_order_items', columns, values);
+}
+
+async function insertInChunks(
+  table: 'demo_orders' | 'demo_order_items',
+  columns: string[],
+  values: Array<Array<string | number | null>>,
+  conflictClause = '',
+): Promise<void> {
+  const chunkSize = 100;
+  for (let start = 0; start < values.length; start += chunkSize) {
+    const chunk = values.slice(start, start + chunkSize);
+    const params = chunk.flat();
+    const rowsSql = chunk
+      .map((row, rowIndex) => {
+        const placeholders = row.map((_, columnIndex) => `$${rowIndex * columns.length + columnIndex + 1}`);
+        return `(${placeholders.join(', ')})`;
+      })
+      .join(', ');
+
+    await getPool().query(
+      `insert into ${table} (${columns.join(', ')})
+       values ${rowsSql}
+       ${conflictClause}`,
+      params,
+    );
+  }
+}
+
+function emptyAnalytics(): DemoAnalytics {
+  return {
+    totalOrders: 0,
+    totalRevenueCents: 0,
+    last30DaysOrders: 0,
+    last30DaysRevenueCents: 0,
+    months: getLastSixMonths().map((month) => ({
+      label: month.label,
+      startDate: month.startDate,
+      endDate: month.endDate,
+      orders: 0,
+      revenueCents: 0,
+    })),
+    topProducts: [],
+  };
+}
+
+function getLastSixMonths(): Array<{
+  key: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+}> {
+  const now = new Date();
+  const months: Array<{
+    key: string;
+    label: string;
+    startDate: string;
+    endDate: string;
+  }> = [];
+
+  for (let offset = 5; offset >= 0; offset -= 1) {
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1));
+    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 59, 59, 999));
+    months.push({
+      key: monthKey(start),
+      label: start.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }),
+      startDate: start.toISOString(),
+      endDate: end.toISOString(),
+    });
+  }
+
+  return months;
+}
+
+function monthKey(date: Date): string {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function weightedPick<T extends { weight: number }>(items: T[], rand: () => number): T {
+  const total = items.reduce((sum, item) => sum + item.weight, 0);
+  let cursor = rand() * total;
+  for (const item of items) {
+    cursor -= item.weight;
+    if (cursor <= 0) return item;
+  }
+  return items[items.length - 1];
+}
+
+function seededRandom(seed: number): () => number {
+  let value = seed;
+  return () => {
+    value = (value * 16807) % 2147483647;
+    return (value - 1) / 2147483646;
+  };
 }
 
 async function setStateValue(key: string, value: string): Promise<void> {
